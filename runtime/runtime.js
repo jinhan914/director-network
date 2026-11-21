@@ -72,7 +72,9 @@
   function validateNetwork(net) {
     if (!net || typeof net !== "object")
       throw err("schema_violation", "Network is not an object");
-    var front = net.metadata && net.metadata.front_agent;
+    // Spec field is front_man (MVP Profile 0.3 §manifest); front_agent is
+    // kept as an alias for this runtime's own network files.
+    var front = net.metadata && (net.metadata.front_man || net.metadata.front_agent);
     if (!front) throw err("schema_violation", "Network has no front_agent");
     if (!Array.isArray(net.tools) || net.tools.length === 0)
       throw err("schema_violation", "Network has no agents");
@@ -103,7 +105,7 @@
     if (!man || !Array.isArray(man.networks) || man.networks.length === 0)
       throw err("schema_violation", "Manifest has no networks");
     man.networks.forEach(function (n) {
-      if (!n.name || !n.front_agent || !n.hocon)
+      if (!n.name || !(n.front_man || n.front_agent) || !n.hocon)
         throw err("schema_violation",
           "Manifest network entry is incomplete: " + JSON.stringify(n));
     });
@@ -255,21 +257,35 @@
     var net = await (await fetch(peerBase + criticUrl.replace(/^\.\//, ""))).json();
     validateNetwork(net);
     // In this data model the network name lives in metadata, not top-level.
-    if (net.metadata.front_agent !== "critic" || net.metadata.name !== "critic")
+    // front_man is the spec field; front_agent is the alias kept in our files.
+    var peerFront = net.metadata.front_man || net.metadata.front_agent;
+    if (peerFront !== "critic" || net.metadata.name !== "critic")
       throw err("schema_violation", "Peer network is not the 'critic' network (exact match required)");
     var entry = man.networks.find(function (n) { return n.name === "critic"; });
-    if (!entry || entry.hocon !== criticUrl.replace(/^\.\//, ""))
+    // hocon and the links target are the same path; normalise the "./" prefix.
+    var norm = function (p) { return String(p || "").replace(/^\.\//, ""); };
+    if (!entry || norm(entry.hocon) !== norm(criticUrl))
       throw err("schema_violation", "Peer manifest has no network named 'critic' matching links.json");
     log("peer", "Loaded peer network 'critic' from " + peerBase + criticUrl);
     // The critic's verdict is produced locally in demo mode by a structured
     // review of the storyboard; with an LLM key it would be a model call.
     // Either way, the peer receives only the storyboard text the user approved.
+    // A weak storyboard must get real fixes, not a perfect score: a single
+    // scene, a scene under four words, or a scene with no signal for the
+    // caster are all weaknesses worth naming (see critic.network.json).
     var issues = [];
+    if (storyboard.scenes.length === 1)
+      issues.push({ scene: 1, fix: "Only one scene in the whole storyboard — split the script into more scenes, one idea per scene, separated by a blank line." });
     storyboard.scenes.forEach(function (s, i) {
+      var words = s.text.split(/\s+/).filter(Boolean).length;
       if (s.text.split(/\s+/).length > 40)
         issues.push({ scene: i + 1, fix: "Split this scene: it carries more than one idea." });
-      if (s.kind === "kinetic" && s.text.length < 10)
+      if (words < 4)
+        issues.push({ scene: i + 1, fix: "Very short scene (" + words + " words) — merge it with the next scene or add the key phrase." });
+      else if (s.kind === "kinetic" && s.text.length < 10)
         issues.push({ scene: i + 1, fix: "Very short scene for kinetic type — merge it with the next scene." });
+      if (!s.signals || s.signals.length === 0)
+        issues.push({ scene: i + 1, fix: "No clear signal for the caster in this scene — add a word that says what it is (numbers, a formula, an orbit, energy) so the casting has something to work on." });
     });
     var score = Math.max(5, 10 - issues.length);
     return { status: "ok", score: score + "/10", fixes: issues.slice(0, 3),
@@ -376,9 +392,9 @@
     }
     // LLM mode: front agent loop with tool calling and delegation.
     log("runtime", "LLM mode: " + settings.model + " via " + settings.baseUrl);
-    var front = findAgent(network, network.metadata.front_agent);
+    var front = findAgent(network, network.metadata.front_man || network.metadata.front_agent);
     if (!front)
-      throw err("schema_violation", "Front agent not defined: " + network.metadata.front_agent);
+      throw err("schema_violation", "Front agent not defined: " + (network.metadata.front_man || network.metadata.front_agent));
     var messages = [
       { role: "system", content: front.instructions || "" },
       { role: "user", content: script }
