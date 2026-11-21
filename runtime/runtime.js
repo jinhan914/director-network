@@ -65,7 +65,8 @@
   // --- Static delegation-cycle detection (Doubao round 2, fix 6). ---
   // A cycle (A → B → A) used to be caught only at runtime by the depth
   // limit; now validateNetwork rejects it up front. Only agent entries
-  // can delegate; site actions have no tools list.
+  // can delegate; site actions declare "tools": [] (round 6 — they call
+  // nothing, and the empty list is what an external validator expects).
   function detectDelegationCycles(net) {
     var agents = {};
     agentEntries(net).forEach(function (a) { agents[a.name] = a; });
@@ -124,6 +125,11 @@
         throw err("schema_violation", "Site action " + t.name + " has no effect classification");
       if (!t.instructions || typeof t.instructions !== "string" || !t.instructions.trim())
         throw err("schema_violation", "Site action " + t.name + " has no instructions");
+      // A site action calls nothing: if it declares a tools list it must
+      // be empty (round 6 — AgentCheck §2.1 expects every tools entry to
+      // carry a tools list, and a site action claiming tools would be a lie).
+      if (t.tools !== undefined && (!Array.isArray(t.tools) || t.tools.length !== 0))
+        throw err("schema_violation", "Site action " + t.name + " must declare tools: []");
     });
     if (!names[front])
       throw err("schema_violation", "Front agent not defined: " + front);
