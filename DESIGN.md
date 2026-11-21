@@ -143,7 +143,7 @@ without a JSON Schema or effect, and rejects any reference it cannot resolve.
 - [x] LLM mode delegation: director → caster → writer → exporter runs end
       to end with a stubbed model (see "Round 2 implementation" below);
       still needs a live BYOK test against a real router
-- [ ] AgentCheck (https://agentcheck.netlify.app) run on the published URL;
+- [x] AgentCheck (https://agentcheck.netlify.app) run on the published URL;
       all 34 rules pass or are documented — first run 2026-11-21: NOT
       CONFORMING YET, 7 passed / 2 MUST failed / 2 tips (see "Round 3
       fixes"). **Re-test 2026-11-21 12:24 CST: 29 passed / 1 MUST failed /
@@ -153,7 +153,13 @@ without a JSON Schema or effect, and rejects any reference it cannot resolve.
       passes for both networks; the remaining MUST is a side effect of
       the round-4 fix: AgentCheck treats the 3 site-action entries as
       agents and requires instructions for each (see "Round 5 fixes"
-      below). Must re-run after re-uploading the round-5 fixed files.
+      below). **Re-test 2026-11-21 12:47 CST: CONFORMING, 35 passed /
+      0 failed / 4 tips** — every MUST passes; the 4 tips are the
+      bridge (intentionally not built, see "Deliberately out of scope"),
+      the site actions' missing tools list, and the peer rule in both
+      front agents' instructions (see "Round 6 fixes" below). Must
+      re-run after re-uploading the round-6 fixed files — the bridge tip
+      is expected to remain.
 - [ ] Screenshots + David's on-camera video (<2 min, public YouTube)
 
 ## Round 3 fixes — real-browser test + AgentCheck (2026-11-21)
@@ -366,6 +372,94 @@ failure is resolved; BYOK live test with a real key; screenshots; video.
 - `runtime/runtime.js` — `validateNetwork()` now requires instructions
   on site actions; stale "no instructions" comment corrected
 - `tests/demo-flow.test.js` — 5 new round-5 checks (69/69 total)
+- `DESIGN.md` — this section, checklist
+
+## Round 6 fixes — AgentCheck re-test tips (2026-11-21)
+
+Re-test 2026-11-21 12:47 CST on the re-uploaded site: **CONFORMING,
+35 passed, 0 failed, 4 tips.** Every MUST rule passes. This round reads
+the checker's own source (`pratikpoddar/agentcheck`,
+`site/lib/checker.js`, commit `643d173`) instead of guessing at the
+wording — the exact test for each tip is quoted below.
+
+1. **Tip (1) — action bridge: NOT fixable honestly, stays open by
+   design.** `checkBridge()` (checker.js L1106–1133) runs whenever the
+   manifest declares an `actions` object, and warns unless
+   `actions.bridge` exists, is same-origin, loads with HTTP 200, sends
+   no `X-Frame-Options`, has no `frame-ancestors 'none'/'self'` CSP,
+   contains a `<script type="module">`, and has its own
+   `agent-manifest.json` in the bridge folder. There is **no honest
+   "no bridge" declaration** that clears it: pointing `actions.bridge`
+   at a page that is not a bridge would fail the same check (or worse,
+   claim a bridge that does not work), and deleting the `actions`
+   object would hide three real, published, working local actions just
+   to dodge the check. The decision from rounds 3–4 stands (see
+   "Deliberately out of scope / No action bridge"): cross-site action
+   transport is a §3.1 extension, not a conformance requirement, and a
+   bridge would open a hidden-frame cross-site call surface into this
+   page's canvas and export for a capability no caller needs. The
+   manifest already documents this in `actions.note`. Expected
+   outcome on the next re-test: this one tip remains; the verdict
+   stays CONFORMING.
+2. **Tip (2) — site actions need a tools list.** AgentCheck's §2.1
+   check treats every entry in a network's `tools` array uniformly
+   ("Use [] to declare none"). All 3 site-action entries in
+   `director.network.json` now declare `"tools": []`. `runtime.js`
+   `validateNetwork()` accepts the empty list and now *rejects* a site
+   action that declares a non-empty tools list (a site action claiming
+   tools would be a lie — site actions call nothing); the stale comment
+   claiming site actions "have no tools list" was corrected.
+3. **Tips (3)+(4) — peer rule in both front agents' instructions.**
+   The check (checker.js L619–633) is
+   `front.instructions.includes("When you have no website_* tools") ||
+   /another (site|agent site)'?s? (assistant|agent)/i` — it tests the
+   **inbound** direction: another site running *our* network as a peer,
+   where it has none of our `website_*` tools, and how the front agent
+   should answer that site's assistant. The "Peer rule" sentences added
+   in rounds 4–5 were the **outbound** direction (this site contacting
+   peers only with consent) — a real rule, but not the one the checker
+   tests, which is why both tips survived round 5 even though the
+   outbound rule was present in both instructions. Both front agents
+   now carry the inbound rule in words, each honest about what it can
+   and cannot do without its site tools (rules.js `network.peer_rule`
+   fix text: "When you have no website_* tools, another site's
+   assistant is asking..."):
+   - Director: "When you have no website_* tools, another site's
+     assistant is asking you to direct an animation with only the
+     script it gave you: describe the scenes and the library you would
+     cast each one to, with reasons, in plain text. Say plainly that
+     you cannot render a preview or export a storyboard without your
+     own site's tools, and never invent a render receipt or a download
+     link."
+   - Critic: "When you have no website_* tools, another site's
+     assistant is asking you to review a storyboard with only the text
+     it gave you: judge it on pacing, clarity and library fit and
+     return your verdict as text. You need no site tools for this
+     review, and never claim you called one."
+   The outbound consent rules are kept unchanged alongside them.
+
+Tests: `tests/demo-flow.test.js` now **73/73 pass** (69 before + 4 new
+round-6 checks: tools: [] on all 3 site actions; validateNetwork
+accepts tools:[] and rejects a non-empty tools list on a site action;
+both front agents' instructions contain the inbound peer-rule sentence
+with "another site's assistant"; the inbound rule is honest about
+capabilities). All 4 JSON files parse; `node --check` passes on
+`runtime/runtime.js` and `site-actions.js`.
+
+Still open after round 6: **AgentCheck re-run on the re-uploaded site**
+(parent, browser) — expected: 35+ passed, 0 failed, 1 tip (bridge, by
+design); BYOK live test with a real key; screenshots; video.
+
+## Files changed in round 6 (re-upload all of these)
+
+- `director.network.json` — `"tools": []` on all 3 site-action
+  entries; inbound peer-rule sentence added to the director front
+  agent's instructions
+- `critic.network.json` — inbound peer-rule sentence added to the
+  critic front agent's instructions
+- `runtime/runtime.js` — `validateNetwork()` rejects a site action
+  with a non-empty tools list; stale "no tools list" comment corrected
+- `tests/demo-flow.test.js` — 4 new round-6 checks (73/73 total)
 - `DESIGN.md` — this section, checklist
 
 ## Round 2 implementation (Doubao round 2, steps 1–2, 2026-11-21)
