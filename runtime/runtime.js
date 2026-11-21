@@ -55,6 +55,15 @@
   // treat every tools entry uniformly, spec §2.1) but they are never
   // run as sub-agents — dispatchTool handles them first.
   function isSiteAction(entry) { return entry && entry.kind === "site_action"; }
+  // A site action's handler may be a bare string (round 4–7 form) or an
+  // object {url, mime, sha256} (round 8 form). Either way it resolves to
+  // the handler module URL; sha256 is null until a real hash is recorded.
+  function handlerUrl(entry) {
+    if (!entry) return null;
+    if (typeof entry.handler === "string") return entry.handler;
+    if (entry.handler && typeof entry.handler.url === "string") return entry.handler.url;
+    return null;
+  }
   function agentEntries(net) {
     return (net.tools || []).filter(function (a) { return !isSiteAction(a); });
   }
@@ -121,8 +130,18 @@
         throw err("schema_violation", "Site action " + t.name + " has no function description");
       if (!t.function.parameters || t.function.parameters.type !== "object")
         throw err("schema_violation", "Site action " + t.name + " has no JSON Schema parameters");
+      // Round 7: a site action's parameters must be closed — callers may
+      // not smuggle extra fields past the declared schema. NOTE the check
+      // must be `!== false`, not `!x === false`: `!x === false` parses as
+      // `(!x) === false` and would accept a missing field.
+      if (t.function.parameters.additionalProperties !== false)
+        throw err("schema_violation", "Site action " + t.name + " parameters must set additionalProperties: false");
       if (!t.effect)
         throw err("schema_violation", "Site action " + t.name + " has no effect classification");
+      // Round 8: the handler may be a string or a {url, mime, sha256}
+      // object, but it must resolve to a handler URL either way.
+      if (!handlerUrl(t))
+        throw err("schema_violation", "Site action " + t.name + " has no handler URL");
       if (!t.instructions || typeof t.instructions !== "string" || !t.instructions.trim())
         throw err("schema_violation", "Site action " + t.name + " has no instructions");
       // A site action calls nothing: if it declares a tools list it must
@@ -152,6 +171,16 @@
   function validateManifest(man) {
     if (!man || !Array.isArray(man.networks) || man.networks.length === 0)
       throw err("schema_violation", "Manifest has no networks");
+    // Round 8: the top-level peer_policy is a structured object, not a
+    // bare string (round 7): mode must be consent or deny, and
+    // allowed_peers must be an array (empty for deny).
+    var pp = man.peer_policy;
+    if (!pp || typeof pp !== "object" || Array.isArray(pp))
+      throw err("schema_violation", "Manifest peer_policy must be an object");
+    if (pp.mode !== "consent" && pp.mode !== "deny")
+      throw err("schema_violation", "Manifest peer_policy.mode must be 'consent' or 'deny'");
+    if (!Array.isArray(pp.allowed_peers))
+      throw err("schema_violation", "Manifest peer_policy.allowed_peers must be an array");
     man.networks.forEach(function (n) {
       if (!n.name || !(n.front_man || n.front_agent) || !n.hocon)
         throw err("schema_violation",
