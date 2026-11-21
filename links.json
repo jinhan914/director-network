@@ -1,0 +1,1 @@
+{"networks":{"director":{"critic":"./critic.network.json"}},"note":"Peer-network link map. 'critic' resolves to ./critic.network.json, relative to this site's own origin (same-origin peer). The runtime reads this map after user consent, fetches the linked network file, validates it, and cross-checks the peer manifest for an exact-name match before running it.","version":1}
