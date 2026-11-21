@@ -55,16 +55,28 @@ naming the peer origin and purpose before fetching anything.
 | `website_export_storyboard` | read | Returns the full storyboard JSON (scenes, signals, reasons, code) as a downloadable file. |
 
 All three are registered with the runtime with name, purpose, JSON Schema and
-effect classification. The runtime validates arguments and shows the user the
-destination and arguments before any write. No site action touches the network,
-sends data off-origin, or spends money.
+effect classification, **and declared in `director.network.json` itself** as
+`kind: "site_action"` entries in the network's `tools` array (round 4): each
+carries `function.description`, a `function.parameters` JSON Schema matching
+the real handler arguments, `effect` (read/write) and `handler:
+"./site-actions.js"`. That is the spec's own shape for grounded capability
+(§2.1: a runtime MAY expose a catalog of registered site actions; §3.1: site
+actions are described by name, purpose, JSON Schema, effect and handler) —
+and it is what the reference runtime's validator needs to resolve an agent's
+tool reference without knowing this site's runtime. The runtime validates
+arguments and shows the user the destination and arguments before any write.
+No site action touches the network, sends data off-origin, or spends money.
+Site actions are tools, never delegation targets: the runtime's agent lookup
+excludes them, a model call naming one is dispatched to the handler (never
+run as a sub-agent), and `validateNetwork()` rejects a site action declared
+without a JSON Schema or effect, and rejects any reference it cannot resolve.
 
 ## Conformance map (MVP Profile 0.3)
 
 | Spec requirement | How this project meets it |
 |---|---|
-| Manifest `agent-manifest.json` | Published at site root; networks `director` + `critic`, each with `front_man` (spec field; `front_agent` kept as an alias for this runtime) and `hocon` (`./<network>.network.json`, resolved JSON path); `llm_router` with `base_url` + `byok_router` as the user-configurable placeholder `https://YOUR_ROUTER_BASE_URL/v1` (no default router, no Otari — see "Round 3 fixes"); `deployment` = static / self-contained runtime / direct BYOK; `actions.version` = 1, `module` = `./site-actions.js` (no bridge — see below); `peer_policy: "consent"`; `allowed_peers` = same origin |
-| Resolved network definition | `director.network.json` + `critic.network.json`, Neuro SAN data model, JSON form, no includes/env refs |
+| Manifest `agent-manifest.json` | Published at site root; networks `director` + `critic`, each with `front_man` (spec field; `front_agent` kept as an alias for this runtime) and `hocon` (`./<network>.network.json`, resolved JSON path); `llm_router` with `base_url` + `byok_router` as the user-configurable placeholder `https://YOUR_ROUTER_BASE_URL/v1` (no default router, no Otari — see "Round 3 fixes"); `deployment` = static / self-contained runtime / direct BYOK; `actions.version` = 1, `module` = `./site-actions.js`, plus an `actions.note` documenting that there is deliberately no `actions.bridge` (see "Round 4 fixes"); `peer_policy: "consent"`; `allowed_peers` = same origin |
+| Resolved network definition | `director.network.json` + `critic.network.json`, Neuro SAN data model, JSON form, no includes/env refs; every tool reference resolves to an agent or a site action declared in the same network (round 4 — see below) |
 | Runtime in the browser | `runtime/runtime.js`: parse + validate (rejects malformed network, duplicate/missing agents, bad front agent), agent loop with streaming + tool calls + delegation, bounded history |
 | Grounded capability | Site actions above; MCP is not used — the spec allows grounded capability via registered local site actions |
 | Peer loading | `links.json` maps `critic` → critic network URL; runtime fetches peer manifest, exact-name match only, consent card before fetch, peer runs on caller's router/key, key never sent to peer |
@@ -94,6 +106,20 @@ sends data off-origin, or spends money.
   than omitting it. If a future version shares an action cross-site, the
   bridge is the first thing to add, with `bridge-actions.js` allow-listing
   only the read actions.
+  - **AgentCheck re-test (2026-11-21 12:24 CST) raised this as a tip:**
+    without a bridge, a cross-site caller waits ~10 s and then fails.
+    That is the *expected* outcome for a feature we intentionally do not
+    offer, not a conformance failure: MVP Profile 0.3 §3.1 says
+    "Cross-site action transport is an extension", and §2.1 makes it
+    conditional on the origin permitting the caller. Building a bridge
+    would not fix a spec gap — it would create a new trust surface
+    (hidden-frame cross-site calls into a page's canvas and export) for a
+    capability no caller needs. So the decision stands, and it is now
+    recorded in the manifest itself (`actions.note`) as well as here, so a
+    checker reading the manifest sees the reasoning instead of an
+    unexplained absence. What breaks without it: nothing on this site —
+    only a hypothetical cross-site caller that wants to drive this page's
+    canvas, which the spec does not require us to support.
 - **No coded-tool bundle.** The network is data-only, which is the minimum
   portable profile and the safest for peer trust.
 - **No server.** Static hosting (GitHub Pages) + CORS is all the spec needs;
@@ -118,9 +144,12 @@ sends data off-origin, or spends money.
       to end with a stubbed model (see "Round 2 implementation" below);
       still needs a live BYOK test against a real router
 - [ ] AgentCheck (https://agentcheck.netlify.app) run on the published URL;
-      all 34 rules pass or are documented — **first run 2026-11-21: NOT
-      CONFORMING YET, 7 passed / 2 MUST failed / 2 tips** (see "Round 3
-      fixes" below). Must re-run after re-uploading the fixed files.
+      all 34 rules pass or are documented — first run 2026-11-21: NOT
+      CONFORMING YET, 7 passed / 2 MUST failed / 2 tips (see "Round 3
+      fixes"). **Re-test 2026-11-21 12:24 CST: 29 passed / 1 MUST failed /
+      9 tips** — the remaining MUST was the undeclared site-action tools
+      (see "Round 4 fixes" below). Must re-run after re-uploading the
+      round-4 fixed files.
 - [ ] Screenshots + David's on-camera video (<2 min, public YouTube)
 
 ## Round 3 fixes — real-browser test + AgentCheck (2026-11-21)
@@ -181,6 +210,95 @@ AgentCheck run found 5 gaps; all 5 are fixed below. Tests:
 
 Still open after round 3: **AgentCheck re-run on the re-uploaded site**
 (parent, browser); BYOK live test with a real key; screenshots; video.
+
+## Round 4 fixes — AgentCheck re-test MUST + tips (2026-11-21)
+
+Re-test 2026-11-21 12:24 CST on the re-uploaded site: **29 passed, 1 MUST
+failed, 9 tips.** The one MUST failure: "Passes the reference runtime's
+validator §3.1" — "Agent 'caster' references missing tool
+'website_cast_scene'. Agent 'kinetic_writer' references missing tool
+'website_render_scene'. ... (all writers)". The tools were real and
+implemented (site-actions.js / window.DirectorActions) but were not defined
+inside the network, so an external validator could not see them. Checked
+against MVP Profile 0.3 (spec repo re-cloned to /tmp only to read the spec
+text; no reference runtime/bridge code copied — the runtime remains
+self-written): §2.1 allows a catalog of registered site actions and §3.1
+requires them to be described by name, purpose, JSON Schema, effect and
+handler; the reference example network resolves every tool reference to an
+entry in its `tools` array, each with `function.parameters`, and carries
+top-level `llm_config.model_name` and `max_execution_seconds`.
+
+1. **MUST fix — site actions declared in the network.**
+   `director.network.json` now carries the three tools as `kind:
+   "site_action"` entries in its `tools` array, each with
+   `function.description`, a `function.parameters` JSON Schema matching the
+   real handler arguments (cast: `scene` required; render: `kind` enum of
+   the 5 styles + `scene` required; export: `storyboard` required),
+   `effect` (read / write) and `handler: "./site-actions.js"`. The
+   references were kept — the tools are real. Runtime behaviour is
+   identical: demo mode calls `window.DirectorActions` directly; LLM mode
+   dispatches the same names. What changed in `runtime/runtime.js` is the
+   bookkeeping: site-action entries are excluded from the agent lookup
+   (`findAgent` / `agentNames` / cycle detection), `validateNetwork()`
+   resolves a reference against agents + declared site actions +
+   runtime-registered actions, rejects a site action without a JSON Schema
+   or effect, and `dispatchTool()` handles a site-action call first so it
+   can never be mistaken for a delegation to a sub-agent;
+   `toolsForAgent()` now hands the model the schema declared in the
+   network instead of a generic one.
+2. **Tip (a) — invocation schemas.** Every callable agent now has
+   `function.parameters`: director `{script}`, caster/writers `{scene,
+   index}`, exporter `{storyboard}`, critic `{storyboard}` (critic keeps
+   its structured `output` schema too).
+3. **Tip (b) — model name.** Both networks now carry top-level
+   `llm_config.model_name: "gpt-4o-mini"` — the honest default: it is the
+   model the UI defaults to (`index.html` falls back to `gpt-4o-mini`
+   when the settings field is empty), with a note that it is a default
+   only and BYOK lets the visitor choose their own model, per spec §2.1
+   (the caller's router and model policy take precedence).
+4. **Tip (c) — bounded execution declared.** `director.network.json`
+   now declares `max_execution_seconds: 60`, `max_tool_calls: 30`,
+   `max_delegation_depth: 3` — the exact limits the runtime already
+   enforces (tests assert they match `DirectorRuntime.limits`);
+   `critic.network.json` declares `max_execution_seconds: 60`.
+5. **Tip (d) — peer rule for the front agent.** `director.network.json`
+   now carries a top-level `peer_policy` (`mode: "consent"`,
+   `allowed_peers: ["self"]`, with the consent-gated same-origin policy
+   spelled out) and the director's instructions now state the rule in
+   words: only contact the `critic` peer listed in `links.json`, only
+   after user consent, only same-origin; never contact another site's
+   peer, never send the visitor's key or unapproved data.
+6. **Bridge tip — decided, not built.** See "Deliberately out of scope /
+   No action bridge": cross-site action transport is a §3.1 extension,
+   not a conformance requirement; a bridge would create a hidden-frame
+   cross-site call surface into this page's canvas/export for a
+   capability no caller needs. The decision is now recorded in the
+   manifest itself (`actions.note`), not just in this file.
+
+Tests: `tests/demo-flow.test.js` now **64/64 pass** (53 before + 11 new
+round-4 checks, including the reference-resolution mirror, schema/effect/
+handler checks, the three runtime rejection cases, and the
+site-action-is-not-an-agent check). All 4 JSON files parse; `node --check`
+passes on `runtime/runtime.js` and `site-actions.js`.
+
+Still open after round 4: **AgentCheck re-run on the re-uploaded site**
+(parent, browser) — this is the final check on whether the MUST failure
+is resolved; BYOK live test with a real key; screenshots; video.
+
+## Files changed in round 4 (re-upload all of these)
+
+- `director.network.json` — 3 site-action entries, parameters schemas on
+  all 8 agents, `llm_config`, bounds, `peer_policy`, peer rule in the
+  director instructions
+- `critic.network.json` — parameters schema on critic, `llm_config`,
+  `max_execution_seconds`
+- `runtime/runtime.js` — site-action vs agent distinction in validation,
+  lookup, tool schemas and dispatch
+- `agent-manifest.json` — `actions.note` documenting the no-bridge
+  decision (reformatted with sorted keys; content otherwise unchanged)
+- `tests/demo-flow.test.js` — 11 new round-4 checks (64/64 total)
+- `DESIGN.md` — this section, conformance map, checklist, bridge
+  decision
 
 ## Round 2 implementation (Doubao round 2, steps 1–2, 2026-11-21)
 

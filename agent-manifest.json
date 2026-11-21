@@ -1,1 +1,61 @@
-{"actions":{"agentTools":["website_cast_scene","website_render_scene","website_export_storyboard"],"module":"./site-actions.js","version":1},"allowed_peers":["self"],"deployment":{"browser_mock":false,"direct_byok":true,"mode":"static","self_contained_runtime":true},"links":"links.json","llm_router":{"base_url":"https://YOUR_ROUTER_BASE_URL/v1","byok_router":"https://YOUR_ROUTER_BASE_URL/v1","default":null,"mock":false,"note":"Placeholder, not a real endpoint and never fetched. There is no default router and no Otari account: demo mode runs the full flow with no router at all, and a visitor who wants LLM mode enters their own OpenAI-compatible router base URL, model and key in the settings panel (index.html section 5). Replace the placeholder with your own router URL there."},"networks":[{"description":"Casts a script into animated scenes: picks the right animation library per scene, renders a preview, exports a storyboard.","front_agent":"director","front_man":"director","hocon":"./director.network.json","name":"director"},{"description":"Peer reviewer: reads a storyboard and returns a structured verdict on pacing, clarity and library fit.","front_agent":"critic","front_man":"critic","hocon":"./critic.network.json","name":"critic"}],"peer_policy":"consent","router":{"default":null,"note":"No publisher-funded default inference. Demo mode runs the full flow with no key (deterministic local casting). Visitors may bring their own OpenAI-compatible router, model and key."},"site":{"description":"An open agentic website: a director agent network that casts your script into animation, with a critic peer network that reviews the storyboard. Built from the SLAY HACKS AI Animation Director.","name":"Director Network","url":"https://jinhan914.github.io/director-network/"},"spec":{"profile":"Worldwide Agentic Web MVP Profile 0.3","spec_date":"2026-11-18","spec_repo_commit":"f154be8f43fb6152be221279cada7da6a1e931ea"},"version":1}
+{
+ "actions": {
+  "agentTools": [
+   "website_cast_scene",
+   "website_render_scene",
+   "website_export_storyboard"
+  ],
+  "module": "./site-actions.js",
+  "note": "No actions.bridge: the three actions are page-local (they draw on this page's own canvas and export this page's own storyboard) and are not callable cross-site. Cross-site action transport is an extension under MVP Profile 0.3 \u00a73.1, not a conformance requirement \u2014 a caller that needs cross-site action access will find no bridge endpoint here, by design. The cross-site feature this site does offer is peer loading (the critic), which works through links.json plus explicit user consent instead of a bridge.",
+  "version": 1
+ },
+ "allowed_peers": [
+  "self"
+ ],
+ "deployment": {
+  "browser_mock": false,
+  "direct_byok": true,
+  "mode": "static",
+  "self_contained_runtime": true
+ },
+ "links": "links.json",
+ "llm_router": {
+  "base_url": "https://YOUR_ROUTER_BASE_URL/v1",
+  "byok_router": "https://YOUR_ROUTER_BASE_URL/v1",
+  "default": null,
+  "mock": false,
+  "note": "Placeholder, not a real endpoint and never fetched. There is no default router and no Otari account: demo mode runs the full flow with no router at all, and a visitor who wants LLM mode enters their own OpenAI-compatible router base URL, model and key in the settings panel (index.html section 5). Replace the placeholder with your own router URL there."
+ },
+ "networks": [
+  {
+   "description": "Casts a script into animated scenes: picks the right animation library per scene, renders a preview, exports a storyboard.",
+   "front_agent": "director",
+   "front_man": "director",
+   "hocon": "./director.network.json",
+   "name": "director"
+  },
+  {
+   "description": "Peer reviewer: reads a storyboard and returns a structured verdict on pacing, clarity and library fit.",
+   "front_agent": "critic",
+   "front_man": "critic",
+   "hocon": "./critic.network.json",
+   "name": "critic"
+  }
+ ],
+ "peer_policy": "consent",
+ "router": {
+  "default": null,
+  "note": "No publisher-funded default inference. Demo mode runs the full flow with no key (deterministic local casting). Visitors may bring their own OpenAI-compatible router, model and key."
+ },
+ "site": {
+  "description": "An open agentic website: a director agent network that casts your script into animation, with a critic peer network that reviews the storyboard. Built from the SLAY HACKS AI Animation Director.",
+  "name": "Director Network",
+  "url": "https://jinhan914.github.io/director-network/"
+ },
+ "spec": {
+  "profile": "Worldwide Agentic Web MVP Profile 0.3",
+  "spec_date": "2026-11-18",
+  "spec_repo_commit": "f154be8f43fb6152be221279cada7da6a1e931ea"
+ },
+ "version": 1
+}
