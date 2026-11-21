@@ -248,6 +248,45 @@ runCode(inlineScripts[0], "index-inline.js");
       critic.tools.find(a => a.name === "critic").instructions || "") &&
     /never send the visitor's key/.test(
       critic.tools.find(a => a.name === "critic").instructions || ""));
+  // --- Round 6 fixes (2026-11-21, after AgentCheck re-test 12:47 CST:
+  // CONFORMING, 35 passed / 0 failed / 4 tips) ---
+  // The 4 tips, read from the checker's own source (pratikpoddar/agentcheck,
+  // site/lib/checker.js): (1) bridge.ok — checkBridge warns unless
+  // actions.bridge exists and loads; there is no honest "no bridge"
+  // declaration, and deleting the actions object would hide real published
+  // actions, so this tip stays open by design (see DESIGN.md, "No action
+  // bridge"). (2) §2.1: the 3 site-action entries need a tools list —
+  // "tools": []. (3)+(4) network.peer_rule: the check is
+  // instructions.includes("When you have no website_* tools") ||
+  // /another (site|agent site)'?s? (assistant|agent)/i — it tests the
+  // INBOUND direction (another site running our network as a peer, with
+  // none of our website_* tools), not the outbound consent rule written
+  // in rounds 4–5. Both front agents now carry the inbound rule in
+  // words, with an honest statement of what they can and cannot do
+  // without their site tools.
+  check("round 6 tip (2): all 3 site actions declare an empty tools list",
+    siteActionsOf(director).length === 3 &&
+    siteActionsOf(director).every(t => Array.isArray(t.tools) && t.tools.length === 0));
+  check("round 6 tip (2): validateNetwork accepts tools:[] on site actions and rejects a non-empty one",
+    R.validateNetwork(director) === true &&
+    (() => {
+      const bad = JSON.parse(JSON.stringify(director));
+      bad.tools.find(t => t.name === "website_render_scene").tools = ["caster"];
+      let e = null; try { R.validateNetwork(bad); } catch (err) { e = err; }
+      return e && e.code === "schema_violation" && /tools: \[\]/.test(e.message);
+    })());
+  check("round 6 tips (3)+(4): both front agents' instructions carry the inbound peer rule ('When you have no website_* tools', another site's assistant)",
+    /When you have no website_\* tools, another site's assistant is asking/.test(
+      director.tools.find(a => a.name === "director").instructions || "") &&
+    /When you have no website_\* tools, another site's assistant is asking/.test(
+      critic.tools.find(a => a.name === "critic").instructions || ""));
+  check("round 6 tips (3)+(4): the inbound peer rule is honest about what each front agent can do without its site tools",
+    /cannot render a preview or export a storyboard without your own site's tools/.test(
+      director.tools.find(a => a.name === "director").instructions || "") &&
+    /never invent a render receipt/.test(
+      director.tools.find(a => a.name === "director").instructions || "") &&
+    /You need no site tools for this review, and never claim you called one/.test(
+      critic.tools.find(a => a.name === "critic").instructions || ""));
   const manFrontManOnly = JSON.parse(JSON.stringify(manifest));
   manFrontManOnly.networks.forEach(n => { delete n.front_agent; });
   check("validateManifest accepts front_man-only entries",
