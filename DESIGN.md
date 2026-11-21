@@ -148,8 +148,12 @@ without a JSON Schema or effect, and rejects any reference it cannot resolve.
       CONFORMING YET, 7 passed / 2 MUST failed / 2 tips (see "Round 3
       fixes"). **Re-test 2026-11-21 12:24 CST: 29 passed / 1 MUST failed /
       9 tips** — the remaining MUST was the undeclared site-action tools
-      (see "Round 4 fixes" below). Must re-run after re-uploading the
-      round-4 fixed files.
+      (see "Round 4 fixes" below). **Re-test 2026-11-21 12:35 CST:
+      35 passed / 1 MUST failed / 3 tips** — the validator MUST now
+      passes for both networks; the remaining MUST is a side effect of
+      the round-4 fix: AgentCheck treats the 3 site-action entries as
+      agents and requires instructions for each (see "Round 5 fixes"
+      below). Must re-run after re-uploading the round-5 fixed files.
 - [ ] Screenshots + David's on-camera video (<2 min, public YouTube)
 
 ## Round 3 fixes — real-browser test + AgentCheck (2026-11-21)
@@ -299,6 +303,70 @@ is resolved; BYOK live test with a real key; screenshots; video.
 - `tests/demo-flow.test.js` — 11 new round-4 checks (64/64 total)
 - `DESIGN.md` — this section, conformance map, checklist, bridge
   decision
+
+## Round 5 fixes — AgentCheck re-test MUST + tips (2026-11-21)
+
+Re-test 2026-11-21 12:35 CST on the re-uploaded site: **35 passed, 1 MUST
+failed, 3 tips.** The validator MUST now passes for both networks. The
+one remaining MUST failure is a side effect of the round-4 fix:
+"Every agent has a name, a function description, instructions and a
+tools list §2.1" — AgentCheck now treats the 3 site-action entries
+(`website_cast_scene`, `website_render_scene`,
+`website_export_storyboard`) as agents and requires `instructions`
+for each.
+
+1. **MUST fix — instructions on the 3 site actions.**
+   `director.network.json` now gives each site-action entry an
+   `instructions` field in plain language: what the action does, its
+   inputs, and its effect. Cast: runs the deterministic keyword
+   classifier on the scene, returns library + reason + rejected
+   alternatives + signals; read-only. Render: draws the scene on the
+   stage canvas in the given kind; write to the local UI only.
+   Export: returns the full storyboard JSON as a downloadable file;
+   read-only. Each states it is a grounded site action, not an LLM
+   agent (no model call, no network request).
+   `function.description`, `function.parameters`, `effect` and `handler`
+   are unchanged. `runtime/runtime.js` `validateNetwork()` accepts the
+   extra field (it never rejected unknown fields) and now *requires*
+   instructions on every site action, so the fix is self-enforcing;
+   the stale comment claiming site actions "have no instructions" was
+   corrected — they carry instructions for validators but are still
+   never run as sub-agents (`dispatchTool` handles them first,
+   `findAgent` excludes them).
+2. **Tip — peer rule in the front agents' instructions.** The director
+   already had it (round 4 tip d, asserted by the existing test): only
+   contact the `critic` peer listed in `links.json`, only after user
+   consent, only same-origin; never contact another site's peer, never
+   send the visitor's key or unapproved data. The critic's instructions
+   now carry the same rule in words: it runs in the visitor's browser
+   and only reviews the storyboard the user approved; never contacts
+   any other peer network, never sends the visitor's key or any data
+   outside the approved storyboard, never loads a network from another
+   site. (`critic.network.json` has no site actions, so no fix was
+   needed there.)
+
+Tests: `tests/demo-flow.test.js` now **69/69 pass** (64 before + 5 new
+round-5 checks: instructions present on all 3 site actions with
+what/inputs/effect; instructions match the real behaviour; validateNetwork
+accepts the entries and rejects one declared without instructions; a
+site action with instructions is still not a delegatable agent; both
+front agents' instructions state the peer rule). All 4 JSON files parse;
+`node --check` passes on `runtime/runtime.js` and `site-actions.js`.
+
+Still open after round 5: **AgentCheck re-run on the re-uploaded site**
+(parent, browser) — this is the final check on whether the last MUST
+failure is resolved; BYOK live test with a real key; screenshots; video.
+
+## Files changed in round 5 (re-upload all of these)
+
+- `director.network.json` — `instructions` added to all 3 site-action
+  entries (function.description, parameters, effect, handler unchanged)
+- `critic.network.json` — peer-rule sentence added to the critic front
+  agent's instructions
+- `runtime/runtime.js` — `validateNetwork()` now requires instructions
+  on site actions; stale "no instructions" comment corrected
+- `tests/demo-flow.test.js` — 5 new round-5 checks (69/69 total)
+- `DESIGN.md` — this section, checklist
 
 ## Round 2 implementation (Doubao round 2, steps 1–2, 2026-11-21)
 
