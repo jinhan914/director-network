@@ -45,12 +45,28 @@
     else console.log("[director]", activity, msg);
   }
 
+  // A network entry is a site action when it carries kind === "site_action":
+  // a grounded capability declared in the network (spec §2.1 — "a runtime
+  // MAY also expose a catalog of registered site actions", §3.1 — site
+  // actions are described by name, purpose, JSON Schema, effect and
+  // handler), implemented by the site's own handler, not an LLM agent.
+  // Site actions are tools, never delegation targets: they have no
+  // instructions and cannot be run as sub-agents.
+  function isSiteAction(entry) { return entry && entry.kind === "site_action"; }
+  function agentEntries(net) {
+    return (net.tools || []).filter(function (a) { return !isSiteAction(a); });
+  }
+  function siteActionEntries(net) {
+    return (net.tools || []).filter(isSiteAction);
+  }
+
   // --- Static delegation-cycle detection (Doubao round 2, fix 6). ---
   // A cycle (A → B → A) used to be caught only at runtime by the depth
-  // limit; now validateNetwork rejects it up front.
+  // limit; now validateNetwork rejects it up front. Only agent entries
+  // can delegate; site actions have no tools list.
   function detectDelegationCycles(net) {
     var agents = {};
-    net.tools.forEach(function (a) { agents[a.name] = a; });
+    agentEntries(net).forEach(function (a) { agents[a.name] = a; });
     var state = {};
     var stack = [];
     function visit(name) {
@@ -79,7 +95,7 @@
     if (!Array.isArray(net.tools) || net.tools.length === 0)
       throw err("schema_violation", "Network has no agents");
     var names = {};
-    net.tools.forEach(function (a) {
+    agentEntries(net).forEach(function (a) {
       if (!a.name) throw err("schema_violation", "Agent without a name");
       if (names[a.name])
         throw err("schema_violation", "Duplicate agent: " + a.name);
@@ -87,11 +103,33 @@
       if (!a.function || !a.function.description)
         throw err("schema_violation", "Agent " + a.name + " has no function description");
     });
+    // Site actions declared in the network (round 4 fix): every website_*
+    // tool an agent references must be defined here, with a purpose and a
+    // JSON Schema, so an external validator can resolve the reference
+    // without knowing this site's runtime. Names must not collide with
+    // agent names.
+    var siteActions = {};
+    siteActionEntries(net).forEach(function (t) {
+      if (!t.name) throw err("schema_violation", "Site action without a name");
+      if (names[t.name] || siteActions[t.name])
+        throw err("schema_violation", "Duplicate tool name: " + t.name);
+      siteActions[t.name] = true;
+      if (!t.function || !t.function.description)
+        throw err("schema_violation", "Site action " + t.name + " has no function description");
+      if (!t.function.parameters || t.function.parameters.type !== "object")
+        throw err("schema_violation", "Site action " + t.name + " has no JSON Schema parameters");
+      if (!t.effect)
+        throw err("schema_violation", "Site action " + t.name + " has no effect classification");
+    });
     if (!names[front])
       throw err("schema_violation", "Front agent not defined: " + front);
-    net.tools.forEach(function (a) {
+    agentEntries(net).forEach(function (a) {
       (a.tools || []).forEach(function (t) {
-        if (typeof t === "string" && !names[t] && !window.DirectorActions[t]) {
+        // A reference resolves to an agent, to a site action declared in
+        // this network, or to a runtime-registered action. Anything else
+        // is the exact failure AgentCheck reported (round 4): an agent
+        // referencing a tool the validator cannot see.
+        if (typeof t === "string" && !names[t] && !siteActions[t] && !window.DirectorActions[t]) {
           throw err("schema_violation",
             "Agent " + a.name + " references unknown tool/agent: " + t);
         }
@@ -169,17 +207,24 @@
 
   function findAgent(network, name) {
     var found = null;
-    (network.tools || []).forEach(function (a) { if (a.name === name) found = a; });
+    agentEntries(network).forEach(function (a) { if (a.name === name) found = a; });
     return found;
   }
   function agentNames(network) {
     var m = {};
-    (network.tools || []).forEach(function (a) { m[a.name] = true; });
+    agentEntries(network).forEach(function (a) { m[a.name] = true; });
     return m;
+  }
+  function siteActionEntry(network, name) {
+    var found = null;
+    siteActionEntries(network).forEach(function (t) { if (t.name === name) found = t; });
+    return found;
   }
 
   // Tools the model may call for one agent: only what that agent declares.
-  // Agent names are delegation targets; anything else is a grounded site
+  // Agent names are delegation targets; a site action uses the JSON Schema
+  // declared for it in the network (round 4), so the model sees the real
+  // arguments instead of a generic schema. Anything else is a grounded site
   // action with a generic schema (the runtime, not the model, enforces
   // which site actions each agent may actually use).
   function toolsForAgent(agent, network) {
@@ -187,7 +232,12 @@
       var sub = findAgent(network, t);
       if (sub) return { type: "function", function: {
         name: t, description: sub.function.description,
-        parameters: { type: "object", properties: { input: { type: "string" } } }
+        parameters: sub.function.parameters || { type: "object", properties: { input: { type: "string" } } }
+      } };
+      var site = siteActionEntry(network, t);
+      if (site) return { type: "function", function: {
+        name: t, description: site.function.description,
+        parameters: site.function.parameters
       } };
       return { type: "function", function: {
         name: t,
@@ -302,6 +352,21 @@
     var args = {};
     try { args = JSON.parse(tc.function.arguments || "{}"); } catch (e) { args = {}; }
     var names = agentNames(ctx.network);
+    // Site actions first: they are tools, not agents. A model call naming
+    // one must never be mistaken for a delegation to a sub-agent (round 4:
+    // the site actions are now entries in the network's tools array, so
+    // agentNames() no longer contains them — but check explicitly anyway).
+    if (siteActionEntry(ctx.network, fn)) {
+      if ((agent.tools || []).indexOf(fn) === -1)
+        throw err("permission_denied",
+          "Permission denied: agent " + agent.name + " may not call " + fn +
+          " (not in its declared tools)");
+      if (!window.DirectorActions || !window.DirectorActions[fn])
+        throw err("schema_violation", "Unknown tool: " + fn);
+      if (fn === "website_export_storyboard" && args.storyboard)
+        ctx.exportedStoryboard = args.storyboard;
+      return window.DirectorActions[fn](args);
+    }
     if (names[fn]) {
       if (ctx.depth > 0)
         throw err("permission_denied",
