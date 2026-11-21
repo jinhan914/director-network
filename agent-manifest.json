@@ -42,7 +42,13 @@
    "name": "critic"
   }
  ],
- "peer_policy": "consent",
+ "peer_policy": {
+  "allowed_peers": [
+   "self"
+  ],
+  "mode": "consent",
+  "note": "Cross-site action transport is an extension per Worldwide Agentic Web MVP Profile 0.3 §3.1."
+ },
  "router": {
   "default": null,
   "note": "No publisher-funded default inference. Demo mode runs the full flow with no key (deterministic local casting). Visitors may bring their own OpenAI-compatible router, model and key."

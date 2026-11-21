@@ -450,6 +450,93 @@ Still open after round 6: **AgentCheck re-run on the re-uploaded site**
 (parent, browser) — expected: 35+ passed, 0 failed, 1 tip (bridge, by
 design); BYOK live test with a real key; screenshots; video.
 
+## Rounds 7+8 fixes — Doubao round 6 follow-ups (2026-11-21)
+
+Doubao round 6 (chat https://www.doubao.com/chat/38455507938505474,
+replied 2026-11-21 15:26 CST) found **no MUST-level issues** — the
+AgentCheck CONFORMING verdict stands, and all three round-6 fixes
+(`tools: []`, the inbound peer rule, keeping no bridge) are sound.
+The remaining items are SHOULD-level. Rounds 7 and 8 apply them;
+**round 9 (structured output / `response_format` in the LLM path) is
+bigger and is DEFERRED** — it would touch `callModel()` and the
+per-agent tool schemas, and the current stub tests do not prove a real
+model honours `response_format`; revisit only after the BYOK live test.
+
+### Round 7 — structured peer policy, closed site-action schemas
+
+1. **Manifest `peer_policy` is now a structured object** (was the bare
+   string `"consent"`): `{"mode": "consent", "allowed_peers": ["self"],
+   "note": "Cross-site action transport is an extension per Worldwide
+   Agentic Web MVP Profile 0.3 §3.1."}`. The §3.1 reference in
+   `actions.note` was already present since round 3 — no change needed
+   there. The top-level `allowed_peers: ["self"]` field is kept as-is
+   for backward compatibility.
+2. **`critic.network.json` gains top-level `peer_policy`**
+   `{"mode": "deny", "allowed_peers": [], "note": "Critic network never
+   initiates outbound peer connections; only accepts invocation as peer
+   from same-origin director after user consent."}`. The critic's
+   instructions text rules are unchanged (rounds 4–6).
+3. **`validateNetwork()` now requires `additionalProperties: false` on
+   site-action parameters** — callers may not smuggle extra fields past
+   the declared schema. **Doubao's suggested snippet was wrong and was
+   NOT used as written:** `if(!t.function.parameters.additionalProperties
+   === false)` parses as `(!x) === false` and would accept a missing
+   field. The correct check is
+   `if (t.function.parameters.additionalProperties !== false) throw
+   err("schema_violation", ...)`. (This is the second Doubao snippet
+   caught by verifying against the real code; see AGENTS.md.)
+
+### Round 8 — manifest peer-policy validation, handler objects
+
+1. **`validateManifest()` now validates the top-level `peer_policy`**:
+   it must be an object, `mode` must be `consent` or `deny`, and
+   `allowed_peers` must be an array (empty for `deny`). A manifest with
+   a bad or missing `peer_policy` fails with `schema_violation`.
+2. **The 3 site-action `handler` fields are now objects**
+   `{"url": "./site-actions.js", "mime": "text/javascript",
+   "sha256": null}` — `sha256` is a null placeholder, to be filled only
+   with a real hash of the handler file later. The runtime never
+   executes a handler from the network (site actions are registered in
+   `window.DirectorActions` by `site-actions.js` itself); the only place
+   the handler is resolved is validation, via a new `handlerUrl(entry)`
+   helper that reads `typeof t.handler === "string" ? t.handler :
+   t.handler.url`, so the old string form still validates.
+3. **No bridge was built, the `actions` node was not deleted, and no
+   peer-rule instructions were removed** — the round-6 decisions stand.
+
+Tests: `tests/demo-flow.test.js` now **79/79 pass** (73 before + 6 new
+round-7/8 checks: manifest `peer_policy` structured object with §3.1
+note; critic `peer_policy` mode `deny` with empty `allowed_peers`;
+`validateNetwork` rejects a site action whose parameters lack
+`additionalProperties: false` (missing *and* `true` variants);
+`validateManifest` rejects a bad/missing `peer_policy`;
+all 3 handlers are `{url, mime, sha256: null}` objects;
+`validateNetwork` accepts object-form handlers, still accepts the old
+string form, and rejects a missing handler). The round-4 test that
+asserted `t.handler === "./site-actions.js"` now accepts both forms via
+the same `handlerUrl` logic. All 4 JSON files parse; `node --check`
+passes on `runtime/runtime.js`, `site-actions.js` and the test file.
+
+Still open after rounds 7+8: **re-upload + AgentCheck re-run on the
+live site** (parent, browser) — expected: CONFORMING, 0 failed, 1 tip
+(bridge, by design); BYOK live test with a real key; screenshots; video.
+
+## Files changed in rounds 7+8 (re-upload all of these)
+
+- `agent-manifest.json` — top-level `peer_policy` is now the
+  structured object `{mode: "consent", allowed_peers: ["self"], note}`
+- `critic.network.json` — top-level `peer_policy` `{mode: "deny",
+  allowed_peers: [], note}`
+- `director.network.json` — all 3 site-action `handler` fields are now
+  `{url: "./site-actions.js", mime: "text/javascript", sha256: null}`
+- `runtime/runtime.js` — `validateNetwork()` requires
+  `additionalProperties: false` on site-action parameters and validates
+  the handler via `handlerUrl()` (string or object form);
+  `validateManifest()` validates the top-level `peer_policy`
+- `tests/demo-flow.test.js` — 6 new round-7/8 checks (79/79 total);
+  round-4 handler assertion updated to accept both handler forms
+- `DESIGN.md` — this section, checklist
+
 ## Files changed in round 6 (re-upload all of these)
 
 - `director.network.json` — `"tools": []` on all 3 site-action
