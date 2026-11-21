@@ -127,6 +127,81 @@ runCode(inlineScripts[0], "index-inline.js");
   check("manifest actions.version === 1 and module === ./site-actions.js",
     manifest.actions && manifest.actions.version === 1 &&
     manifest.actions.module === "./site-actions.js");
+  // --- Round 4 fixes (2026-11-21, after AgentCheck re-test 12:24 CST:
+  // 29 passed / 1 MUST failed / 9 tips) ---
+  // MUST: "Passes the reference runtime's validator §3.1" — agents
+  // referenced website_cast_scene / website_render_scene, but those tools
+  // were not defined inside the network. They are now declared as
+  // site_action entries in the network's tools array (spec §2.1: a runtime
+  // MAY expose a catalog of registered site actions; §3.1: described by
+  // name, purpose, JSON Schema, effect and handler), so every reference
+  // resolves without removing the tools or changing runtime behaviour.
+  const isSiteAction = e => e && e.kind === "site_action";
+  const agentsOf = net => net.tools.filter(e => !isSiteAction(e));
+  const siteActionsOf = net => net.tools.filter(isSiteAction);
+  const resolvable = net => {
+    const names = new Set([...agentsOf(net).map(a => a.name), ...siteActionsOf(net).map(t => t.name)]);
+    return agentsOf(net).every(a => (a.tools || []).every(t => typeof t !== "string" || names.has(t)));
+  };
+  check("round 4 MUST: every tool reference in director resolves to an agent or a declared site action",
+    resolvable(director), JSON.stringify(director.tools.map(t => t.name)));
+  check("round 4 MUST: the 3 site actions are declared in director.tools with description + JSON Schema + effect + handler",
+    siteActionsOf(director).length === 3 &&
+    ["website_cast_scene", "website_render_scene", "website_export_storyboard"]
+      .every(n => siteActionsOf(director).some(t => t.name === n)) &&
+    siteActionsOf(director).every(t => t.function && t.function.description &&
+      t.function.parameters && t.function.parameters.type === "object" &&
+      Array.isArray(t.function.parameters.required) &&
+      ["read", "write"].includes(t.effect) && t.handler === "./site-actions.js"));
+  check("round 4 MUST: site-action schemas match the real handlers (cast needs scene; render needs kind+scene; export needs storyboard)",
+    siteActionsOf(director).find(t => t.name === "website_cast_scene").function.parameters.required.includes("scene") &&
+    siteActionsOf(director).find(t => t.name === "website_render_scene").function.parameters.required.includes("kind") &&
+    siteActionsOf(director).find(t => t.name === "website_render_scene").function.parameters.properties.kind.enum.length === 5 &&
+    siteActionsOf(director).find(t => t.name === "website_export_storyboard").function.parameters.required.includes("storyboard"));
+  check("round 4 tip (a): every callable agent has function.parameters JSON Schema (director + critic)",
+    [...agentsOf(director), ...agentsOf(critic)].every(a =>
+      a.function && a.function.parameters && a.function.parameters.type === "object" &&
+      Array.isArray(a.function.parameters.required) && a.function.parameters.required.length > 0));
+  check("round 4 tip (b): llm_config.model_name is the honest UI default (gpt-4o-mini) in both networks, BYOK note present",
+    director.llm_config && director.llm_config.model_name === "gpt-4o-mini" &&
+    critic.llm_config && critic.llm_config.model_name === "gpt-4o-mini" &&
+    /BYOK/.test(director.llm_config.note || ""));
+  check("round 4 tip (c): bounded execution declared in the network and matches the runtime limits (30 calls / 60s / depth 3)",
+    director.max_execution_seconds === 60 && director.max_tool_calls === 30 &&
+    director.max_delegation_depth === 3 &&
+    R.limits.maxToolCalls === director.max_tool_calls &&
+    R.limits.maxSeconds === director.max_execution_seconds &&
+    R.limits.maxDepth === director.max_delegation_depth &&
+    critic.max_execution_seconds === 60);
+  check("round 4 tip (d): director network declares a peer rule (consent-gated, same-origin only)",
+    director.peer_policy && director.peer_policy.mode === "consent" &&
+    Array.isArray(director.peer_policy.allowed_peers) &&
+    director.peer_policy.allowed_peers.join() === "self" &&
+    /only contact the 'critic' peer/.test(
+      director.tools.find(a => a.name === "director").instructions || ""));
+  check("round 4 bridge decision: manifest documents that no actions.bridge exists, by design (cross-site transport is a §3.1 extension)",
+    manifest.actions && typeof manifest.actions.note === "string" &&
+    /No actions\.bridge/.test(manifest.actions.note) &&
+    /extension/.test(manifest.actions.note) && !("bridge" in manifest.actions));
+  const badRef = JSON.parse(JSON.stringify(director));
+  badRef.tools.find(a => a.name === "caster").tools = ["website_nonexistent"];
+  let badRefErr = null;
+  try { R.validateNetwork(badRef); } catch (e) { badRefErr = e; }
+  check("round 4: validateNetwork still rejects an agent referencing an unknown tool",
+    badRefErr && badRefErr.code === "schema_violation" && /website_nonexistent/.test(badRefErr.message),
+    badRefErr && (badRefErr.code + ": " + badRefErr.message));
+  const badSchema = JSON.parse(JSON.stringify(director));
+  delete badSchema.tools.find(t => t.name === "website_cast_scene").function.parameters;
+  let badSchemaErr = null;
+  try { R.validateNetwork(badSchema); } catch (e) { badSchemaErr = e; }
+  check("round 4: validateNetwork rejects a site action declared without a JSON Schema",
+    badSchemaErr && badSchemaErr.code === "schema_violation" && /JSON Schema/.test(badSchemaErr.message),
+    badSchemaErr && (badSchemaErr.code + ": " + badSchemaErr.message));
+  let delegateSiteErr = null;
+  try { await R._delegate(director, "website_cast_scene", { scene: "x" }, { key: "sk-test", baseUrl: "https://model.test/v1", model: "test-model" }, 0); } catch (e) { delegateSiteErr = e; }
+  check("round 4: a site action is not a delegatable agent (_delegate to website_cast_scene throws)",
+    delegateSiteErr && delegateSiteErr.code === "schema_violation" && /Unknown agent/.test(delegateSiteErr.message),
+    delegateSiteErr && (delegateSiteErr.code + ": " + delegateSiteErr.message));
   const manFrontManOnly = JSON.parse(JSON.stringify(manifest));
   manFrontManOnly.networks.forEach(n => { delete n.front_agent; });
   check("validateManifest accepts front_man-only entries",
