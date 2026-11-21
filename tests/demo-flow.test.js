@@ -137,6 +137,9 @@ runCode(inlineScripts[0], "index-inline.js");
   // name, purpose, JSON Schema, effect and handler), so every reference
   // resolves without removing the tools or changing runtime behaviour.
   const isSiteAction = e => e && e.kind === "site_action";
+  // Round 8: a handler may be a bare string (old form) or an object
+  // {url, mime, sha256}; either way it resolves to the handler module URL.
+  const handlerUrl = t => typeof t.handler === "string" ? t.handler : (t.handler && t.handler.url);
   const agentsOf = net => net.tools.filter(e => !isSiteAction(e));
   const siteActionsOf = net => net.tools.filter(isSiteAction);
   const resolvable = net => {
@@ -152,7 +155,7 @@ runCode(inlineScripts[0], "index-inline.js");
     siteActionsOf(director).every(t => t.function && t.function.description &&
       t.function.parameters && t.function.parameters.type === "object" &&
       Array.isArray(t.function.parameters.required) &&
-      ["read", "write"].includes(t.effect) && t.handler === "./site-actions.js"));
+      ["read", "write"].includes(t.effect) && handlerUrl(t) === "./site-actions.js"));
   check("round 4 MUST: site-action schemas match the real handlers (cast needs scene; render needs kind+scene; export needs storyboard)",
     siteActionsOf(director).find(t => t.name === "website_cast_scene").function.parameters.required.includes("scene") &&
     siteActionsOf(director).find(t => t.name === "website_render_scene").function.parameters.required.includes("kind") &&
@@ -287,6 +290,78 @@ runCode(inlineScripts[0], "index-inline.js");
       director.tools.find(a => a.name === "director").instructions || "") &&
     /You need no site tools for this review, and never claim you called one/.test(
       critic.tools.find(a => a.name === "critic").instructions || ""));
+  // --- Rounds 7+8 (2026-11-21, Doubao round 6 follow-ups: no MUSTs left,
+  // remaining items are SHOULD-level) ---
+  // Round 7 (a): manifest peer_policy is now a structured object, not a
+  // bare "consent" string; actions.note already cited §3.1 (round 3).
+  check("round 7 (a): manifest peer_policy is a structured object {mode:'consent', allowed_peers:['self'], note citing §3.1}",
+    manifest.peer_policy && typeof manifest.peer_policy === "object" &&
+    manifest.peer_policy.mode === "consent" &&
+    Array.isArray(manifest.peer_policy.allowed_peers) &&
+    manifest.peer_policy.allowed_peers.join() === "self" &&
+    /§3\.1/.test(manifest.peer_policy.note || "") &&
+    /§3\.1/.test(manifest.actions.note || ""));
+  // Round 7 (b): critic network declares top-level peer_policy mode deny;
+  // its instructions text rules are unchanged (round 5 check above).
+  check("round 7 (b): critic network has top-level peer_policy {mode:'deny', allowed_peers:[]}",
+    critic.peer_policy && critic.peer_policy.mode === "deny" &&
+    Array.isArray(critic.peer_policy.allowed_peers) &&
+    critic.peer_policy.allowed_peers.length === 0 &&
+    /never initiates outbound peer connections/.test(critic.peer_policy.note || ""));
+  // Round 7 (c): validateNetwork requires additionalProperties:false on
+  // site-action parameters — and rejects a missing field (the check must
+  // be `!== false`, not `!x === false`, which parses as `(!x) === false`
+  // and would accept a missing field).
+  check("round 7 (c): validateNetwork rejects a site action whose parameters lack additionalProperties:false",
+    R.validateNetwork(director) === true &&
+    (() => {
+      const bad = JSON.parse(JSON.stringify(director));
+      delete bad.tools.find(t => t.name === "website_cast_scene").function.parameters.additionalProperties;
+      let e = null; try { R.validateNetwork(bad); } catch (err) { e = err; }
+      return e && e.code === "schema_violation" && /additionalProperties/.test(e.message);
+    })() &&
+    (() => {
+      const bad = JSON.parse(JSON.stringify(director));
+      bad.tools.find(t => t.name === "website_render_scene").function.parameters.additionalProperties = true;
+      let e = null; try { R.validateNetwork(bad); } catch (err) { e = err; }
+      return e && e.code === "schema_violation" && /additionalProperties/.test(e.message);
+    })());
+  // Round 8 (a): validateManifest validates the top-level peer_policy.
+  check("round 8 (a): validateManifest rejects a bad peer_policy (mode not consent|deny, allowed_peers not an array, missing)",
+    R.validateManifest(manifest) === true &&
+    (() => {
+      const badMode = JSON.parse(JSON.stringify(manifest));
+      badMode.peer_policy.mode = "open";
+      let e1 = null; try { R.validateManifest(badMode); } catch (err) { e1 = err; }
+      const badPeers = JSON.parse(JSON.stringify(manifest));
+      badPeers.peer_policy.allowed_peers = "self";
+      let e2 = null; try { R.validateManifest(badPeers); } catch (err) { e2 = err; }
+      const missing = JSON.parse(JSON.stringify(manifest));
+      delete missing.peer_policy;
+      let e3 = null; try { R.validateManifest(missing); } catch (err) { e3 = err; }
+      return e1 && e1.code === "schema_violation" && e2 && e2.code === "schema_violation" &&
+        e3 && e3.code === "schema_violation";
+    })());
+  // Round 8 (b)+(c): handlers are objects {url, mime, sha256:null};
+  // validateNetwork accepts the object form and the old string form.
+  check("round 8 (b): all 3 site-action handlers are objects {url:'./site-actions.js', mime:'text/javascript', sha256:null}",
+    siteActionsOf(director).length === 3 &&
+    siteActionsOf(director).every(t => t.handler && typeof t.handler === "object" &&
+      t.handler.url === "./site-actions.js" && t.handler.mime === "text/javascript" &&
+      t.handler.sha256 === null));
+  check("round 8 (c): validateNetwork accepts object-form handlers and still accepts the old string form (backward compatible), rejects a missing handler",
+    R.validateNetwork(director) === true &&
+    (() => {
+      const strForm = JSON.parse(JSON.stringify(director));
+      strForm.tools.filter(isSiteAction).forEach(t => { t.handler = "./site-actions.js"; });
+      return R.validateNetwork(strForm) === true;
+    })() &&
+    (() => {
+      const noHandler = JSON.parse(JSON.stringify(director));
+      delete noHandler.tools.find(t => t.name === "website_cast_scene").handler;
+      let e = null; try { R.validateNetwork(noHandler); } catch (err) { e = err; }
+      return e && e.code === "schema_violation" && /handler/.test(e.message);
+    })());
   const manFrontManOnly = JSON.parse(JSON.stringify(manifest));
   manFrontManOnly.networks.forEach(n => { delete n.front_agent; });
   check("validateManifest accepts front_man-only entries",
