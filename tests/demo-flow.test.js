@@ -202,6 +202,52 @@ runCode(inlineScripts[0], "index-inline.js");
   check("round 4: a site action is not a delegatable agent (_delegate to website_cast_scene throws)",
     delegateSiteErr && delegateSiteErr.code === "schema_violation" && /Unknown agent/.test(delegateSiteErr.message),
     delegateSiteErr && (delegateSiteErr.code + ": " + delegateSiteErr.message));
+  // --- Round 5 fixes (2026-11-21, after AgentCheck re-test 12:35 CST:
+  // 35 passed / 1 MUST failed / 3 tips) ---
+  // MUST: "Every agent has a name, a function description, instructions
+  // and a tools list §2.1" — AgentCheck now treats the 3 site-action
+  // entries as agents and requires instructions for each. The
+  // instructions describe in plain language what the action does, its
+  // inputs and its effect; function.description, parameters, effect and
+  // handler are unchanged.
+  check("round 5 MUST: all 3 site actions carry an instructions field describing what they do, their inputs and their effect",
+    siteActionsOf(director).length === 3 &&
+    siteActionsOf(director).every(t => typeof t.instructions === "string" &&
+      t.instructions.length > 80 &&
+      /grounded site action, not an LLM agent/.test(t.instructions) &&
+      /Input:/.test(t.instructions) && /Effect:/.test(t.instructions)));
+  check("round 5 MUST: site-action instructions match the real behaviour (cast returns library+reason+rejected+signals; render draws on the canvas; export returns the storyboard JSON)",
+    /chosen animation library, the reason for the choice, the rejected alternatives, and the keyword signals/.test(
+      siteActionsOf(director).find(t => t.name === "website_cast_scene").instructions) &&
+    /draws the scene on the stage canvas/.test(
+      siteActionsOf(director).find(t => t.name === "website_render_scene").instructions) &&
+    /returns the full storyboard JSON/.test(
+      siteActionsOf(director).find(t => t.name === "website_export_storyboard").instructions));
+  check("round 5 MUST: validateNetwork accepts the site actions with instructions and still rejects one declared without instructions",
+    R.validateNetwork(director) === true &&
+    (() => {
+      const bad = JSON.parse(JSON.stringify(director));
+      delete bad.tools.find(t => t.name === "website_render_scene").instructions;
+      let e = null; try { R.validateNetwork(bad); } catch (err) { e = err; }
+      return e && e.code === "schema_violation" && /instructions/.test(e.message);
+    })());
+  check("round 5 MUST: a site action with instructions is still not a delegatable agent",
+    agentsOf(director).every(a => !siteActionsOf(director).some(t => t.name === a.name)) &&
+    !agentsOf(director).some(a => a.name === "website_cast_scene"));
+  // Tips: front-agent instructions must state the peer rule in words.
+  // Director already had it (round 4 tip d, asserted above); critic
+  // now has it too.
+  check("round 5 tip: both front agents' instructions state the peer rule (director: critic-only after consent, same-origin; critic: approved storyboard only, no other peers)",
+    /only contact the 'critic' peer/.test(
+      director.tools.find(a => a.name === "director").instructions || "") &&
+    /never send the visitor's key/.test(
+      director.tools.find(a => a.name === "director").instructions || "") &&
+    /Peer rule: you run in the visitor's browser and only review the storyboard the user approved/.test(
+      critic.tools.find(a => a.name === "critic").instructions || "") &&
+    /never contact any other peer network/.test(
+      critic.tools.find(a => a.name === "critic").instructions || "") &&
+    /never send the visitor's key/.test(
+      critic.tools.find(a => a.name === "critic").instructions || ""));
   const manFrontManOnly = JSON.parse(JSON.stringify(manifest));
   manFrontManOnly.networks.forEach(n => { delete n.front_agent; });
   check("validateManifest accepts front_man-only entries",
