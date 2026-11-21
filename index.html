@@ -60,7 +60,8 @@ And then — the launch. Light, noise, celebration.</textarea>
       <button class="ghost" id="preset-maths">Maths explainer preset</button>
     </div>
     <label><input type="checkbox" id="ask-critic" checked> Ask the critic peer network to review the storyboard (asks for your consent first)</label>
-    <p class="small">Demo mode needs no key: casting, rendering and export run
+    <p class="small">Separate scenes with a blank line — one idea per scene.
+    Demo mode needs no key: casting, rendering and export run
     locally and deterministically. Add a key below only if you want the director
     to reason with a model.</p>
   </section>
@@ -74,6 +75,10 @@ And then — the launch. Light, noise, celebration.</textarea>
   <section>
     <h2>3 · Director's choices</h2>
     <div id="choices"><p class="small">Nothing directed yet.</p></div>
+    <div>
+      <button class="ghost" id="download-board" disabled>Download storyboard (.json)</button>
+    </div>
+    <p class="small" id="download-note">The storyboard downloads automatically when a run finishes; this button downloads it again.</p>
   </section>
 
   <section>
@@ -162,6 +167,19 @@ And then — the launch. Light, noise, celebration.</textarea>
     });
   }
 
+  var lastBoard = null;
+
+  document.getElementById("download-board").onclick = function () {
+    if (!lastBoard) return;
+    var blob = new Blob([JSON.stringify(lastBoard, null, 2)],
+      { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "director-storyboard.json";
+    a.click();
+    DirectorLog("export", "Storyboard downloaded again (" + lastBoard.scenes.length + " scenes).");
+  };
+
   async function direct() {
     var script = document.getElementById("script").value;
     if (!script.trim()) { alert("Write a script first."); return; }
@@ -178,8 +196,13 @@ And then — the launch. Light, noise, celebration.</textarea>
       });
       var html = board.scenes.map(function (s) {
         return "<p><b>Scene " + (s.index + 1) + " — " + s.library + "</b><br>" +
-          s.text + "<br><span class='small'>" + s.reason + "</span></p>";
+          s.text + "<br><span class='small'>" + s.reason + "</span>" +
+          (s.rejected ? "<br><span class='small'>Rejected alternatives: " + s.rejected + "</span>" : "") +
+          (s.signals && s.signals.length ? "<br><span class='small'>Signals: " + s.signals.join(", ") + "</span>" : "") +
+          "</p>";
       }).join("");
+      lastBoard = board;
+      document.getElementById("download-board").disabled = false;
       if (board.critic) {
         if (board.critic.status === "denied") {
           html += "<p><b>Critic peer review skipped</b><br><span class='small'>" +
