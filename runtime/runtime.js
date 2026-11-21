@@ -50,8 +50,10 @@
   // MAY also expose a catalog of registered site actions", §3.1 — site
   // actions are described by name, purpose, JSON Schema, effect and
   // handler), implemented by the site's own handler, not an LLM agent.
-  // Site actions are tools, never delegation targets: they have no
-  // instructions and cannot be run as sub-agents.
+  // Site actions are tools, never delegation targets: they carry a
+  // plain-language instructions field (so an external validator can
+  // treat every tools entry uniformly, spec §2.1) but they are never
+  // run as sub-agents — dispatchTool handles them first.
   function isSiteAction(entry) { return entry && entry.kind === "site_action"; }
   function agentEntries(net) {
     return (net.tools || []).filter(function (a) { return !isSiteAction(a); });
@@ -120,6 +122,8 @@
         throw err("schema_violation", "Site action " + t.name + " has no JSON Schema parameters");
       if (!t.effect)
         throw err("schema_violation", "Site action " + t.name + " has no effect classification");
+      if (!t.instructions || typeof t.instructions !== "string" || !t.instructions.trim())
+        throw err("schema_violation", "Site action " + t.name + " has no instructions");
     });
     if (!names[front])
       throw err("schema_violation", "Front agent not defined: " + front);
